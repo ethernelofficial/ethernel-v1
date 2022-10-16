@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.16;
 
 /// @title A guessing game based on token prices.
 /// @author Matin Kaboli
@@ -86,16 +86,25 @@ contract Ethernel {
   /// @notice Fires when a pending bet is accepted.
   event BetAccepted(uint betId, address acceptor);
 
-  function createBet(Currency currency, uint predictedPrice, bool isGt, uint specifiedDate, uint expirationDate) payable public returns (uint) {
+  /// @notice Creates a new bet
+  /// @param token The selected token that its price is going to be predicted.
+  /// @param predictedPrice The predicted price for the selected token at the specified date. 
+  /// @param isGt Whether requester wants to guess for higher price or not.
+  /// @param specifiedDate The date specified by requester to check the price at that time
+  /// @param expirationDate The date that this bet expires (If not accepted by anyone at that time.)
+  /// @return Bet ID
+  function createBet(Token token, uint predictedPrice, bool isGt, uint specifiedDate, uint expirationDate) payable public returns (uint) {
+    // Avoid having too much pending bets
     require(ownerPendingBets[msg.sender] <= MAX_PENDING_BETS, "You have reached the limit of pending bets.");
     require(msg.value >= MINIMUM_BET_AMOUNT, "Sent value must be more than minimum amount");
+    // dates must be higher than current timestamp.
     require(expirationDate > block.timestamp, "Expiration date must be greater than current timestamp.");
     require(specifiedDate > block.timestamp, "Specified date must be greater than current timestamp.");
     require(expirationDate < specifiedDate, "Expiration date must be less than specified date.");
 
     Bet memory newBet = Bet(
       msg.value,
-      currency,
+      token,
       predictedPrice,
       isGt,
       specifiedDate,
@@ -113,12 +122,15 @@ contract Ethernel {
     ownerPendingBets[msg.sender]++;
     betToOwner[betId] = msg.sender;
 
-    emit BetCreated(betId, msg.value, currency, predictedPrice, isGt, specifiedDate, expirationDate, msg.sender);
+    emit BetCreated(betId, msg.value, token, predictedPrice, isGt, specifiedDate, expirationDate, msg.sender);
 
     return betId;
   }
 
-  function cancelBet(uint betId) public {
+  /// @notice Cancels a pending bet
+  /// @dev reverts if transferring ETH to requester fails
+  /// @param betId Bet ID is used for canceling
+  function cancelBet(uint betId) public returns (bool) {
     Bet storage _bet = bets[betId];
 
     require(_bet.status == BetStatus.PENDING, "Bet is not pending, so it cannot be canceled.");
@@ -133,12 +145,17 @@ contract Ethernel {
     ownerPendingBets[msg.sender]--;
 
     require(success, "Failed to withdraw requester balance.");
+
+    return true;
   }
 
+  /// @notice Accepts a pending bet from acceptor 
+  /// @return true if succeeds
   function acceptBet(uint betId) public payable returns (bool) {
     Bet storage _bet = bets[betId];
 
     require(_bet.status == BetStatus.PENDING, "Bet is not pending, therefore cannot be accepted.");
+    // Acceptor should also send the same amount of ETH as requester did
     require(_bet.betAmount == msg.value, "Sent value does not match bet amount.");
     require(_bet.requester != msg.sender, "You cannot join your own bet.");
     require(_bet.expirationDate > block.timestamp, "Expiration date has passed. Bet cannot be accepted.");
