@@ -3,10 +3,24 @@ pragma solidity ^0.8.16;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+import "./PriceAggregator.sol";
+
 /// @title A guessing game based on token prices.
 /// @author Matin Kaboli
 /// @dev Contract needs auditing. Do not use at production.
 contract Ethernel is Ownable {
+  uint8 private constant FEE_PERCENTAGE = 1;
+  uint8 private constant MAX_PENDING_BETS = 5;
+  uint private constant MINIMUM_BET_AMOUNT = (1 ether) * 0.001;
+
+  PriceAggregator private priceAggregator;
+  int private btcPrice;
+  int private ethPrice;
+  int private bnbPrice;
+  int private xrpPrice;
+  int private adaPrice;
+  int private solPrice;
+
   /// Bet status. PENDING by default.
   enum BetStatus {
     PENDING,
@@ -48,45 +62,125 @@ contract Ethernel is Ownable {
    */
   struct Bet {
     uint betAmount; 
-
     Token token;
     uint predictedPrice;
     bool isGt;
-
     uint specifiedDate;
     uint expirationDate;
-
     address payable requester;
     address payable acceptor;
-
     BetStatus status;
     Winner winner; 
   }
 
-  uint8 private constant MAX_PENDING_BETS = 5;
-  uint private constant MINIMUM_BET_AMOUNT = (1 ether) * 0.001;
+  uint public contractPureBalance = 0;
+
+  function withdraw() external onlyOwner {
+    (bool success,) = payable(owner()).call{value: contractPureBalance}('');
+
+    require(success, "Failed.");
+  }
 
   Bet[] private bets;
-  mapping(uint => address) private betToOwner;
-  mapping (address => uint) private ownerPendingBets;
 
-  /// @notice Fires when a new bet is created.
-  event BetCreated(
-    uint betId,
-    uint betAmount,
-    Token token,
-    uint predictedPrice,
-    bool isGt,
-    uint specifiedDate,
-    uint expirationDate,
-    address requester
-  );
+  mapping (address => uint) public bettorWins;
+  mapping (address => uint) public bettorLosses;
+  mapping (uint => address) public betToOwner;
+  mapping (address => uint) public ownerPendingBets;
 
-  /// @notice Fires when a pending bet is canceled.
-  event BetCanceled(uint betId, uint betAmount);
+  /// @notice Fires when the status of a bet changes.
+  event BetStatusChanged(uint betId, BetStatus status);
 
-  /// @notice Fires when a pending bet is accepted.
-  event BetAccepted(uint betId, address acceptor);
+  constructor(address aggregator) {
+    priceAggregator = PriceAggregator(aggregator);
+  }
+
+  function tokenPrice(Token t) internal view returns (int) {
+    if (t == Token.BTC) {
+      return btcPrice;
+    }
+
+    if (t == Token.ETH) {
+      return ethPrice;
+    }
+
+    if (t == Token.BNB) {
+      return bnbPrice;
+    }
+
+    if (t == Token.XRP) {
+      return xrpPrice;
+    }
+
+    if (t == Token.ADA) {
+      return adaPrice;
+    }
+
+    if (t == Token.SOL) {
+      return solPrice;
+    }
+
+    revert(); 
+  }
+
+  function comparePrices(int actualPrice, uint predictedPrice) internal pure returns (uint8 result) {
+    uint predictedPriceMultipled = predictedPrice * (10 ** 8);
+
+    if (actualPrice == int(predictedPriceMultipled)) {
+      return 0;
+    }
+
+    if (actualPrice < int(predictedPriceMultipled)) {
+      return 1;
+    }
+
+    return 2;
+  }
+
+  function setPrices() external onlyOwner {
+    (int btc, int eth, int bnb, int xrp, int ada, int sol) = priceAggregator.getTokenPrices();
+
+    btcPrice = btc;
+    ethPrice = eth;
+    bnbPrice = bnb;
+    xrpPrice = xrp;
+    adaPrice = ada;
+    solPrice = sol;
+  }
+
+  function checkBet(uint betId) external onlyOwner {
+    Bet storage _bet = bets[betId];
+
+    if (
+         _bet.status == BetStatus.COMPLETED
+      || _bet.status == BetStatus.EXPIRED
+      || _bet.status == BetStatus.CANCELED
+    ) {
+      return;
+    }
+
+    if (_bet.status == BetStatus.PENDING && _bet.expirationDate < block.timestamp) {
+      expireBet(betId);
+    }
+
+    if (_bet.status == BetStatus.ACCEPTED && _bet.specifiedDate > block.timestamp) {
+      setWinner(betId);
+    }
+  } 
+
+  function expireBet(uint betId) private {
+    Bet storage _bet = bets[betId];
+
+    _bet.status = BetStatus.EXPIRED;
+    
+    (bool success,) = _bet.requester.call{value: _bet.betAmount}('');
+
+    emit BetStatusChanged(betId, _bet.status);
+
+    ownerPendingBets[_bet.requester]--;
+
+    require(success, "Failed to send requester bet amount.");
+  }
 
   /// @notice Retrieve a bet
   /// @return Bet
@@ -130,7 +224,7 @@ contract Ethernel is Ownable {
     ownerPendingBets[msg.sender]++;
     betToOwner[betId] = msg.sender;
 
-    emit BetCreated(betId, msg.value, token, predictedPrice, isGt, specifiedDate, expirationDate, msg.sender);
+    emit BetStatusChanged(betId, newBet.status);
 
     return betId;
   }
@@ -149,7 +243,7 @@ contract Ethernel is Ownable {
 
     (bool success,) = _bet.requester.call{value: _bet.betAmount}('');
 
-    emit BetCanceled(betId, _bet.betAmount);
+    emit BetStatusChanged(betId, _bet.status);
     ownerPendingBets[msg.sender]--;
 
     require(success, "Failed to withdraw requester balance.");
@@ -172,8 +266,44 @@ contract Ethernel is Ownable {
     _bet.status = BetStatus.ACCEPTED;
     _bet.acceptor = payable(msg.sender);
 
-    emit BetAccepted(betId, msg.sender);
+    ownerPendingBets[_bet.requester]--;
+
+    emit BetStatusChanged(betId, _bet.status);
 
     return true;
   }
+
+  function setWinner(uint betId) private {
+    Bet storage _bet = bets[betId];
+
+    int selectedTokenPrice = tokenPrice(_bet.token);
+    uint8 result = comparePrices(selectedTokenPrice, _bet.predictedPrice);
+
+    address payable winner = _bet.requester;
+
+    if (_bet.isGt && result == 2) {
+      winner = _bet.acceptor; 
+    }
+
+    if (winner == _bet.requester) {
+      bettorWins[_bet.requester]++;
+      bettorLosses[_bet.acceptor]++;
+    } else {
+      bettorWins[_bet.acceptor]++;
+      bettorLosses[_bet.requester]++;
+    }
+
+    _bet.status = BetStatus.COMPLETED;
+
+    emit BetStatusChanged(betId, _bet.status);
+
+    uint winnerAmount = _bet.betAmount * 2;
+    uint contractFee = _bet.betAmount / 100 * FEE_PERCENTAGE;
+    winnerAmount -= contractFee;
+
+    (bool success,) = winner.call{value: winnerAmount}('');
+    
+    require(success, "Failed to send balance to the winner.");
+  }
 }
+
