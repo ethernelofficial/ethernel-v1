@@ -8,10 +8,14 @@ import "./PriceAggregator.sol";
 /// @title A guessing game based on token prices.
 /// @author Matin Kaboli
 /// @dev Contract needs auditing. Do not use at production.
+/// @dev Inherits the OpenZepplin Ownable implentation
+/// @dev Requires a new function to set the new PriceAggregator contract address
+/// @dev Requires a new function to set the new MAX_PENDING_BETS and FEE_PERCENTAGE
 contract Ethernel is Ownable {
   uint8 private constant FEE_PERCENTAGE = 1;
   uint8 private constant MAX_PENDING_BETS = 5;
   uint private constant MINIMUM_BET_AMOUNT = (1 ether) * 0.001;
+  uint public contractPureBalance = 0;
 
   PriceAggregator private priceAggregator;
   int private btcPrice;
@@ -73,8 +77,8 @@ contract Ethernel is Ownable {
     Winner winner; 
   }
 
-  uint public contractPureBalance = 0;
 
+  /// @notice Sends fees to the owner
   function withdraw() external onlyOwner {
     (bool success,) = payable(owner()).call{value: contractPureBalance}('');
 
@@ -91,10 +95,15 @@ contract Ethernel is Ownable {
   /// @notice Fires when the status of a bet changes.
   event BetStatusChanged(uint betId, BetStatus status);
 
+  /// @notice Sets PriceAggregator
+  /// @param aggregator PriceAggregator contract address
   constructor(address aggregator) {
     priceAggregator = PriceAggregator(aggregator);
   }
 
+  /// @notice Returns the current price of given token
+  /// @param t Selected token
+  /// @return Current price of the token
   function tokenPrice(Token t) internal view returns (int) {
     if (t == Token.BTC) {
       return btcPrice;
@@ -123,6 +132,10 @@ contract Ethernel is Ownable {
     revert(); 
   }
 
+  /// @notice Compares actual price of the token with user's predicted price
+  /// @param actualPrice The current price of the token
+  /// @param predictedPrice User's predicted price
+  /// @return result 0 if equal, 1 if predicted price is higher than the actual price, 2 if lower.
   function comparePrices(int actualPrice, uint predictedPrice) internal pure returns (uint8 result) {
     uint predictedPriceMultipled = predictedPrice * (10 ** 8);
 
@@ -137,6 +150,7 @@ contract Ethernel is Ownable {
     return 2;
   }
 
+  /// @notice Retrieves the price of tokens and saves them in variables
   function setPrices() external onlyOwner {
     (int btc, int eth, int bnb, int xrp, int ada, int sol) = priceAggregator.getTokenPrices();
 
@@ -148,6 +162,8 @@ contract Ethernel is Ownable {
     solPrice = sol;
   }
 
+  /// @notice Checks if the bet is expired or ready to be finished
+  /// @param betId Bet ID
   function checkBet(uint betId) external onlyOwner {
     Bet storage _bet = bets[betId];
 
@@ -168,6 +184,9 @@ contract Ethernel is Ownable {
     }
   } 
 
+  /// @notice Expires a pending bet and returns held money
+  /// @dev reverts if transferring ETH to requester fails
+  /// @param betId Bet ID
   function expireBet(uint betId) private {
     Bet storage _bet = bets[betId];
 
@@ -229,7 +248,7 @@ contract Ethernel is Ownable {
     return betId;
   }
 
-  /// @notice Cancels a pending bet
+  /// @notice Cancels a pending bet and returns held money
   /// @dev reverts if transferring ETH to requester fails
   /// @param betId Bet ID is used for canceling
   function cancelBet(uint betId) public returns (bool) {
@@ -273,6 +292,8 @@ contract Ethernel is Ownable {
     return true;
   }
 
+  /// @notice Chooses the winner based on predicted price and the actual price of the token
+  /// @param betId Bet ID
   function setWinner(uint betId) private {
     Bet storage _bet = bets[betId];
 
