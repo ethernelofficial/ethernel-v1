@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.16;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 /// @title A guessing game based on token prices.
 /// @author Matin Kaboli
 /// @dev Contract needs auditing. Do not use at production.
-contract Ethernel {
+contract Ethernel is Ownable {
   /// Bet status. PENDING by default.
   enum BetStatus {
     PENDING,
@@ -85,6 +87,12 @@ contract Ethernel {
 
   /// @notice Fires when a pending bet is accepted.
   event BetAccepted(uint betId, address acceptor);
+
+  /// @notice Retrieve a bet
+  /// @return Bet
+  function getBet(uint betId) external view returns (Bet memory) {
+    return bets[betId];
+  }
 
   /// @notice Creates a new bet
   /// @param token The selected token that its price is going to be predicted.
