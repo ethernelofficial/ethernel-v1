@@ -9,8 +9,6 @@ import "./PriceAggregator.sol";
 /// @author Matin Kaboli
 /// @dev Contract needs auditing. Do not use at production.
 /// @dev Inherits the OpenZepplin Ownable implentation
-/// @dev Requires a new function to set the new PriceAggregator contract address
-/// @dev Requires a new function to set the new MAX_PENDING_BETS and FEE_PERCENTAGE
 contract Ethernel is Ownable {
   uint8 private FEE_PERCENTAGE = 1;
   uint8 private MAX_PENDING_BETS = 5;
