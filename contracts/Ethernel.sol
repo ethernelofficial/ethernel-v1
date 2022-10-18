@@ -12,8 +12,8 @@ import "./PriceAggregator.sol";
 /// @dev Requires a new function to set the new PriceAggregator contract address
 /// @dev Requires a new function to set the new MAX_PENDING_BETS and FEE_PERCENTAGE
 contract Ethernel is Ownable {
-  uint8 private constant FEE_PERCENTAGE = 1;
-  uint8 private constant MAX_PENDING_BETS = 5;
+  uint8 private FEE_PERCENTAGE = 1;
+  uint8 private MAX_PENDING_BETS = 5;
   uint private constant MINIMUM_BET_AMOUNT = (1 ether) * 0.001;
   uint public contractPureBalance = 0;
 
@@ -85,6 +85,18 @@ contract Ethernel is Ownable {
     require(success, "Failed.");
   }
 
+  /// @notice Changes FEE_PERCENTAGE
+  /// @param _feePercentage New fee percentage received by each completed bet
+  function setFeePercentage(uint8 _feePercentage) external onlyOwner {
+    FEE_PERCENTAGE = _feePercentage;
+  }
+
+  /// @notice Changes MAX_PENDING_BETS
+  /// @param _maxPendingBets New max amount of pending bets an address can have
+  function setMaxPendingBets(uint8 _maxPendingBets) external onlyOwner {
+    MAX_PENDING_BETS = _maxPendingBets;
+  }
+
   Bet[] private bets;
 
   mapping (address => uint) public bettorWins;
@@ -125,11 +137,7 @@ contract Ethernel is Ownable {
       return adaPrice;
     }
 
-    if (t == Token.SOL) {
-      return solPrice;
-    }
-
-    revert(); 
+    return solPrice;
   }
 
   /// @notice Compares actual price of the token with user's predicted price
